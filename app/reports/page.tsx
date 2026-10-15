@@ -152,43 +152,49 @@ export default function ReportsPage() {
         doc.setFontSize(10.5);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(15, 23, 42);
-        doc.text(formatINR(yearlyData?.summary?.totalInvested || 1283100), 18, 63);
+        const invVal = yearlyData?.summary?.totalInvested ?? yearlyData?.latestYear?.totalInvestment ?? 1283100;
+        const recVal = yearlyData?.summary?.totalRecovered ?? yearlyData?.latestYear?.realizedValue ?? 965984;
+        const unrecVal = yearlyData?.summary?.totalUnrecovered ?? yearlyData?.latestYear?.unrecoveredCost ?? 317116;
+        const recRate = yearlyData?.summary?.overallRecoveryRate ?? yearlyData?.latestYear?.recoveryPercentage ?? 75.3;
+
+        doc.text(formatINR(invVal), 18, 63);
         doc.setTextColor(16, 185, 129); // Emerald
-        doc.text(formatINR(yearlyData?.summary?.totalRecovered || 965984), 58, 63);
+        doc.text(formatINR(recVal), 58, 63);
         doc.setTextColor(239, 68, 68); // Rose
-        doc.text(formatINR(yearlyData?.summary?.totalUnrecovered || 317116), 96, 63);
+        doc.text(formatINR(unrecVal), 96, 63);
         doc.setTextColor(37, 99, 235); // Blue
-        doc.text(`${yearlyData?.summary?.overallRecoveryRate || 75.3}%`, 136, 63);
+        doc.text(`${recRate}%`, 136, 63);
         doc.setTextColor(15, 23, 42);
         doc.text('77.0% (38.5M)', 168, 63);
 
-        // Multi-Year Investment Table
+        // Multi-Year Investment & Optimization Savings Table
         const yearRows = (yearlyData?.years || [
-          { year: 2024, totalCost: 480000, utilizedCost: 312000, unutilizedCost: 168000, recoveryRate: 65.0 },
-          { year: 2025, totalCost: 650000, utilizedCost: 494000, unutilizedCost: 156000, recoveryRate: 76.0 },
-          { year: 2026, totalCost: 1283100, utilizedCost: 965984, unutilizedCost: 317116, recoveryRate: 75.3 },
+          { year: 2024, totalCost: 480000, utilizedCost: 312000, unutilizedCost: 168000, recoveryRate: 65.0, verifiedRealizedSavings: 0, expenditureBeforeOptimization: 480000, expenditureAfterOptimization: 480000 },
+          { year: 2025, totalCost: 650000, utilizedCost: 494000, unutilizedCost: 156000, recoveryRate: 76.0, verifiedRealizedSavings: 0, expenditureBeforeOptimization: 650000, expenditureAfterOptimization: 650000 },
+          { year: 2026, totalCost: 1283100, utilizedCost: 965984, unutilizedCost: 317116, recoveryRate: 75.3, verifiedRealizedSavings: 0, expenditureBeforeOptimization: 1283100, expenditureAfterOptimization: 1283100 },
         ]).map((yr: any) => [
           `FY ${yr.year}`,
-          formatINR(yr.totalCost),
-          formatINR(yr.utilizedCost),
-          formatINR(yr.unutilizedCost),
-          `${yr.recoveryRate}%`,
-          yr.year === 2026 ? '77% (38.5M used)' : 'N/A'
+          formatINR(yr.expenditureBeforeOptimization ?? yr.totalCost ?? yr.totalInvestment ?? 0),
+          formatINR(yr.expenditureAfterOptimization ?? yr.totalCost ?? yr.totalInvestment ?? 0),
+          formatINR(yr.verifiedRealizedSavings ?? 0),
+          formatINR(yr.potentialAnnualSavings ?? yr.unutilizedCost ?? yr.unrecoveredCost ?? 0),
+          `${yr.recoveryRate ?? yr.recoveryPercentage ?? 0}%`,
+          yr.dataCompleteness || (yr.year === 2026 ? 'Ledger (Active)' : 'Audited')
         ]);
 
         autoTable(doc, {
           startY: 75,
-          head: [['Fiscal Year', 'Capital Invested', 'Realized Value Recovered', 'Unrecovered Waste', 'Recovery Rate %', 'Token Consumption']],
+          head: [['Fiscal Year', 'Before Opt. (₹)', 'After Opt. (₹)', 'Verified Saved (₹)', 'Potential Saved (₹)', 'Recovery %', 'Data Status']],
           body: yearRows,
           theme: 'striped',
           headStyles: {
             fillColor: [11, 25, 44],
             textColor: [255, 255, 255],
-            fontSize: 8,
+            fontSize: 7.5,
             fontStyle: 'bold',
           },
           bodyStyles: {
-            fontSize: 8,
+            fontSize: 7.5,
             textColor: [30, 41, 59],
           },
           alternateRowStyles: {
@@ -491,31 +497,33 @@ export default function ReportsPage() {
                 <thead className="bg-slate-50 text-slate-500 font-semibold uppercase text-[10px] border-b border-slate-100">
                   <tr>
                     <th className="py-3 px-4">Fiscal Year</th>
-                    <th className="py-3 px-4">Capital Invested</th>
-                    <th className="py-3 px-4">Realized Value Recovered</th>
-                    <th className="py-3 px-4">Unrecovered Waste</th>
+                    <th className="py-3 px-4">Before Opt.</th>
+                    <th className="py-3 px-4">After Opt.</th>
+                    <th className="py-3 px-4">Verified Saved</th>
+                    <th className="py-3 px-4">Potential Saved</th>
                     <th className="py-3 px-4">Recovery Rate</th>
-                    <th className="py-3 px-4">Token LLM Quota</th>
-                    <th className="py-3 px-4">YoY Improvement</th>
+                    <th className="py-3 px-4">Data Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
                   {(yearlyData?.years || [
-                    { year: 2024, totalCost: 480000, utilizedCost: 312000, unutilizedCost: 168000, recoveryRate: 65.0 },
-                    { year: 2025, totalCost: 650000, utilizedCost: 494000, unutilizedCost: 156000, recoveryRate: 76.0 },
-                    { year: 2026, totalCost: 1283100, utilizedCost: 965984, unutilizedCost: 317116, recoveryRate: 75.3 },
+                    { year: 2024, totalCost: 480000, utilizedCost: 312000, unutilizedCost: 168000, recoveryRate: 65.0, verifiedRealizedSavings: 0, expenditureBeforeOptimization: 480000, expenditureAfterOptimization: 480000 },
+                    { year: 2025, totalCost: 650000, utilizedCost: 494000, unutilizedCost: 156000, recoveryRate: 76.0, verifiedRealizedSavings: 0, expenditureBeforeOptimization: 650000, expenditureAfterOptimization: 650000 },
+                    { year: 2026, totalCost: 1283100, utilizedCost: 965984, unutilizedCost: 317116, recoveryRate: 75.3, verifiedRealizedSavings: 0, expenditureBeforeOptimization: 1283100, expenditureAfterOptimization: 1283100 },
                   ]).map((yr: any) => (
                     <tr key={yr.year} className="hover:bg-slate-50/60 transition">
                       <td className="py-2.5 px-4 font-bold text-slate-900">FY {yr.year}</td>
-                      <td className="py-2.5 px-4 font-bold text-slate-900">{formatINR(yr.totalCost)}</td>
-                      <td className="py-2.5 px-4 text-emerald-600 font-bold">{formatINR(yr.utilizedCost)}</td>
-                      <td className="py-2.5 px-4 text-rose-600 font-semibold">{formatINR(yr.unutilizedCost)}</td>
-                      <td className="py-2.5 px-4 font-bold text-blue-600">{yr.recoveryRate}%</td>
-                      <td className="py-2.5 px-4 text-purple-700 font-medium">
-                        {yr.year === 2026 ? '77% (38.5M of 50M)' : 'N/A'}
-                      </td>
-                      <td className="py-2.5 px-4 font-semibold text-emerald-600">
-                        {yr.year === 2024 ? 'Baseline' : (yr.year === 2025 ? '+11.0% pts' : '+10.3% pts vs 2024')}
+                      <td className="py-2.5 px-4 font-bold text-slate-900">{formatINR(yr.expenditureBeforeOptimization ?? yr.totalCost ?? yr.totalInvestment ?? 0)}</td>
+                      <td className="py-2.5 px-4 text-blue-600 font-bold">{formatINR(yr.expenditureAfterOptimization ?? yr.totalCost ?? yr.totalInvestment ?? 0)}</td>
+                      <td className="py-2.5 px-4 text-emerald-600 font-bold">{formatINR(yr.verifiedRealizedSavings ?? 0)}</td>
+                      <td className="py-2.5 px-4 text-amber-600 font-semibold">{formatINR(yr.potentialAnnualSavings ?? yr.unutilizedCost ?? yr.unrecoveredCost ?? 0)}</td>
+                      <td className="py-2.5 px-4 font-bold text-slate-900">{yr.recoveryRate ?? yr.recoveryPercentage ?? 0}%</td>
+                      <td className="py-2.5 px-4">
+                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${
+                          yr.dataCompleteness === 'COMPLETE' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
+                        }`}>
+                          {yr.dataCompleteness || (yr.year === 2026 ? 'Active Ledger' : 'Audited')}
+                        </span>
                       </td>
                     </tr>
                   ))}

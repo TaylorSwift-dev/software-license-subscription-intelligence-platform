@@ -33,7 +33,8 @@ class LicenseInput(BaseModel):
     vendor_name: str
     total_quantity: int
     active_assignments: int
-    cost_per_license: float # Monthly INR (₹)
+    cost_per_license: float # Unit price in INR (₹)
+    billing_frequency: Optional[str] = "MONTHLY"
     renewal_date: Optional[str] = None
 
 class BatchUtilizationRequest(BaseModel):
@@ -120,11 +121,37 @@ def compute_cost_and_savings(payload: BatchUtilizationRequest):
     data = [item.model_dump() for item in payload.licenses]
     df = pd.DataFrame(data)
 
+    df["freq"] = df.get("billing_frequency", pd.Series(["MONTHLY"] * len(df))).fillna("MONTHLY").astype(str).str.upper()
     df["unused_quantity"] = np.maximum(0, df["total_quantity"] - df["active_assignments"])
-    df["monthly_cost"] = df["total_quantity"] * df["cost_per_license"]
-    df["annual_cost"] = df["monthly_cost"] * 12
-    df["unused_monthly_cost"] = df["unused_quantity"] * df["cost_per_license"]
-    df["potential_annual_saving"] = df["unused_monthly_cost"] * 12
+
+    df["annual_cost"] = np.where(
+        df["freq"] == "ANNUAL",
+        df["total_quantity"] * df["cost_per_license"],
+        np.where(
+            df["freq"] == "ONE_TIME",
+            0.0,
+            df["total_quantity"] * df["cost_per_license"] * 12.0
+        )
+    )
+    df["monthly_cost"] = np.where(
+        df["freq"] == "ANNUAL",
+        (df["total_quantity"] * df["cost_per_license"]) / 12.0,
+        np.where(
+            df["freq"] == "ONE_TIME",
+            0.0,
+            df["total_quantity"] * df["cost_per_license"]
+        )
+    )
+    df["potential_annual_saving"] = np.where(
+        df["freq"] == "ANNUAL",
+        df["unused_quantity"] * df["cost_per_license"],
+        np.where(
+            df["freq"] == "ONE_TIME",
+            0.0,
+            df["unused_quantity"] * df["cost_per_license"] * 12.0
+        )
+    )
+    df["unused_monthly_cost"] = df["potential_annual_saving"] / 12.0
 
     total_monthly = float(df["monthly_cost"].sum())
     total_annual = float(df["annual_cost"].sum())
@@ -296,12 +323,23 @@ def generate_recommendations(payload: RecommendationRequest):
             "suggested_action": "Conduct immediate vendor contract audit to downscale enterprise tier before next billing cycle."
         })
 
-    # RULE 5: Duplicate Category overlap
+    # RULE 5: Duplicate Category overlap (Data-driven: secondary tool spend)
     cat_counts = df["category"].value_counts()
     overlapping_cats = cat_counts[cat_counts > 1].index.tolist()
     for cat in overlapping_cats:
         cat_sw = df[df["category"] == cat]
         names = " & ".join(cat_sw["software_name"].tolist())
+        secondary = cat_sw.iloc[1:]
+        sec_annual = 0.0
+        for _, s_row in secondary.iterrows():
+            f = str(s_row.get("billing_frequency", "MONTHLY")).upper()
+            qty = float(s_row["total_quantity"])
+            cost = float(s_row["cost_per_license"])
+            if f == "ANNUAL":
+                sec_annual += qty * cost
+            elif f == "MONTHLY":
+                sec_annual += qty * cost * 12.0
+
         recommendations.append({
             "software_id": cat_sw.iloc[0]["id"],
             "type": "DUPLICATE_CONSOLIDATION",
@@ -312,8 +350,8 @@ def generate_recommendations(payload: RecommendationRequest):
                 "category": cat,
                 "tools": cat_sw["software_name"].tolist()
             },
-            "estimated_monthly_savings": 5000.0,
-            "estimated_annual_savings": 60000.0,
+            "estimated_monthly_savings": round(sec_annual / 12.0, 2),
+            "estimated_annual_savings": round(sec_annual, 2),
             "suggested_action": "Standardize organizational workflow on a single preferred platform to maximize enterprise volume discount."
         })
 

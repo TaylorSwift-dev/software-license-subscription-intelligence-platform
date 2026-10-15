@@ -53,25 +53,61 @@ export async function GET(req: NextRequest) {
       let totalLicenses = 0;
       let activeAssignments = 0;
       let monthlyCost = 0;
+      let annualCost = 0;
+      let oneTimeCost = 0;
+      let unusedMonthlyCost = 0;
+      let unusedAnnualCost = 0;
       let costPerLicense = 0;
       let allocatedTokens = 0;
       let usedTokens = 0;
       let tokenUnitCost = 0;
 
       for (const lic of sw.licenses) {
-        if (sw.consumptionType === 'TOKEN_BASED' || lic.consumptionType === 'TOKEN_BASED') {
+        const isToken = sw.consumptionType === 'TOKEN_BASED' || lic.consumptionType === 'TOKEN_BASED';
+        const freq = lic.billingFrequency || 'MONTHLY';
+        const licTotal = lic.totalQuantity;
+        const licActive = lic.assignments.length;
+        const licUnused = Math.max(0, licTotal - licActive);
+        costPerLicense = lic.costPerLicense;
+
+        if (isToken) {
           allocatedTokens += lic.allocatedTokens || 0;
           usedTokens += lic.usedTokens || 0;
           tokenUnitCost = lic.tokenUnitCost || 0;
-          monthlyCost += lic.allocatedTokens ? (lic.allocatedTokens * (lic.tokenUnitCost || 0)) : (lic.totalQuantity * lic.costPerLicense);
-          costPerLicense = lic.costPerLicense || (lic.tokenUnitCost ? lic.tokenUnitCost * 1000 : 0);
-          activeAssignments += lic.assignments.length;
-          totalLicenses += lic.totalQuantity;
+          activeAssignments += licActive;
+          totalLicenses += licTotal;
+
+          const poolCost = (lic.allocatedTokens || 0) * (lic.tokenUnitCost || 0);
+          const remainingCost = Math.max(0, (lic.allocatedTokens || 0) - (lic.usedTokens || 0)) * (lic.tokenUnitCost || 0);
+
+          if (freq === 'ANNUAL') {
+            annualCost += poolCost;
+            monthlyCost += poolCost / 12;
+            unusedAnnualCost += remainingCost;
+            unusedMonthlyCost += remainingCost / 12;
+          } else {
+            monthlyCost += poolCost;
+            annualCost += poolCost * 12;
+            unusedMonthlyCost += remainingCost;
+            unusedAnnualCost += remainingCost * 12;
+          }
         } else {
-          totalLicenses += lic.totalQuantity;
-          activeAssignments += lic.assignments.length;
-          monthlyCost += lic.totalQuantity * lic.costPerLicense;
-          costPerLicense = lic.costPerLicense;
+          totalLicenses += licTotal;
+          activeAssignments += licActive;
+
+          if (freq === 'ANNUAL') {
+            annualCost += licTotal * lic.costPerLicense;
+            monthlyCost += (licTotal * lic.costPerLicense) / 12;
+            unusedAnnualCost += licUnused * lic.costPerLicense;
+            unusedMonthlyCost += (licUnused * lic.costPerLicense) / 12;
+          } else if (freq === 'MONTHLY') {
+            monthlyCost += licTotal * lic.costPerLicense;
+            annualCost += licTotal * lic.costPerLicense * 12;
+            unusedMonthlyCost += licUnused * lic.costPerLicense;
+            unusedAnnualCost += licUnused * lic.costPerLicense * 12;
+          } else if (freq === 'ONE_TIME') {
+            oneTimeCost += licTotal * lic.costPerLicense;
+          }
         }
       }
 
@@ -82,10 +118,6 @@ export async function GET(req: NextRequest) {
         : (totalLicenses > 0 
           ? Number(((activeAssignments / totalLicenses) * 100).toFixed(1)) 
           : 0);
-
-      const unusedMonthlyCost = sw.consumptionType === 'TOKEN_BASED' && allocatedTokens > 0
-        ? Math.max(0, allocatedTokens - usedTokens) * tokenUnitCost
-        : unusedLicenses * costPerLicense;
 
       return {
         id: sw.id,
@@ -106,10 +138,11 @@ export async function GET(req: NextRequest) {
         tokenUnitCost,
         utilizationRate,
         costPerLicense,
-        monthlyCost,
-        annualCost: monthlyCost * 12,
-        unusedMonthlyCost,
-        potentialAnnualSaving: unusedMonthlyCost * 12,
+        monthlyCost: Math.round(monthlyCost),
+        annualCost: Math.round(annualCost),
+        oneTimeCost: Math.round(oneTimeCost),
+        unusedMonthlyCost: Math.round(unusedMonthlyCost),
+        potentialAnnualSaving: Math.round(unusedAnnualCost),
         licenses: sw.licenses,
         createdAt: sw.createdAt,
       };
@@ -128,7 +161,20 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { name, category, description, version, website, vendorId, initialLicenses, costPerLicense } = body;
+    const {
+      name,
+      category,
+      description,
+      version,
+      website,
+      vendorId,
+      initialLicenses,
+      costPerLicense,
+      consumptionType = 'SEAT_BASED',
+      billingFrequency = 'MONTHLY',
+      allocatedTokens,
+      tokenUnitCost,
+    } = body;
 
     if (!name || !category || !vendorId) {
       return NextResponse.json(
@@ -145,6 +191,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const isToken = consumptionType === 'TOKEN_BASED';
+    const parsedAllocatedTokens = isToken ? parseFloat(allocatedTokens || '0') : 0;
+    const parsedTokenUnitCost = isToken ? parseFloat(tokenUnitCost || '0') : 0;
+    const totalQty = parseInt(initialLicenses || '1', 10);
+    const cost = parseFloat(costPerLicense || '0');
+
     const software = await prisma.$transaction(async (tx) => {
       const sw = await tx.software.create({
         data: {
@@ -154,10 +206,11 @@ export async function POST(req: NextRequest) {
           version,
           website,
           vendorId,
+          consumptionType,
         },
       });
 
-      if (initialLicenses && initialLicenses > 0) {
+      if (totalQty > 0 || (isToken && parsedAllocatedTokens > 0)) {
         const renewalDate = new Date();
         renewalDate.setFullYear(renewalDate.getFullYear() + 1);
 
@@ -165,19 +218,28 @@ export async function POST(req: NextRequest) {
           data: {
             softwareId: sw.id,
             vendorId,
-            totalQuantity: parseInt(initialLicenses, 10),
-            costPerLicense: parseFloat(costPerLicense) || 0,
+            consumptionType,
+            billingFrequency,
+            allocatedTokens: parsedAllocatedTokens,
+            usedTokens: 0,
+            tokenUnitCost: parsedTokenUnitCost,
+            totalQuantity: totalQty,
+            costPerLicense: cost,
             renewalDate,
             notes: 'Initial license provisioning',
           },
         });
+
+        const estAnnual = isToken && parsedAllocatedTokens > 0
+          ? (billingFrequency === 'ANNUAL' ? parsedAllocatedTokens * parsedTokenUnitCost : parsedAllocatedTokens * parsedTokenUnitCost * 12)
+          : (billingFrequency === 'ANNUAL' ? totalQty * cost : totalQty * cost * 12);
 
         await tx.renewal.create({
           data: {
             softwareId: sw.id,
             licenseId: lic.id,
             renewalDate,
-            estimatedCost: lic.totalQuantity * lic.costPerLicense,
+            estimatedCost: Math.round(estAnnual),
           },
         });
       }

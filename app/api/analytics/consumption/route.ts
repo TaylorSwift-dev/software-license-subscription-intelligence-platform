@@ -196,9 +196,20 @@ export async function GET(req: NextRequest) {
           })
           .sort((a, b) => b.utilizationPercentage - a.utilizationPercentage);
 
-        // Monthly figures (October 2026 / current monthly cycle)
-        const monthlyAllocated = Math.round(allocatedTokens / 10);
-        const monthlyUsed = Math.round(usedTokens / 10);
+        // Monthly figures based on license billing frequency and timestamped usage records (no fabricated / 10 division)
+        const isAnnualLicense = tokenLic?.billingFrequency === 'ANNUAL';
+        const monthlyAllocated = isAnnualLicense ? Math.round(allocatedTokens / 12) : Math.round(allocatedTokens);
+
+        const currentMonthRecords = relevantUsageRecords.filter((ur) => {
+          const recDate = new Date(ur.recordedAt);
+          return recDate.getMonth() === 9 && recDate.getFullYear() === 2026;
+        });
+
+        const monthlyUsedFromRecords = currentMonthRecords.reduce((sum, r) => sum + (r.tokensUsed || 0), 0);
+        const monthlyUsed = monthlyUsedFromRecords > 0
+          ? monthlyUsedFromRecords
+          : (isAnnualLicense ? Math.round(usedTokens / 12) : Math.round(usedTokens));
+
         const monthlyRemaining = Math.max(0, monthlyAllocated - monthlyUsed);
         const monthlyUtil = monthlyAllocated > 0 ? Number(((monthlyUsed / monthlyAllocated) * 100).toFixed(1)) : 0;
         const monthlyTotalCost = Math.round(monthlyAllocated * tokenUnitCost);
@@ -206,8 +217,8 @@ export async function GET(req: NextRequest) {
         const monthlyUnusedCost = Math.round(monthlyRemaining * tokenUnitCost);
 
         const monthlyEmployeeUsage = employeeUsage.map((emp) => {
-          const mAlloc = Math.round(emp.allocatedTokens / 10);
-          const mUsed = Math.round(emp.usedTokens / 10);
+          const mAlloc = isAnnualLicense ? Math.round(emp.allocatedTokens / 12) : emp.allocatedTokens;
+          const mUsed = isAnnualLicense ? Math.round(emp.usedTokens / 12) : emp.usedTokens;
           return {
             ...emp,
             allocatedTokens: mAlloc,

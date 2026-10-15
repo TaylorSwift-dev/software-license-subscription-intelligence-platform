@@ -22,7 +22,11 @@ import {
   YAxis,
   Tooltip,
   Legend,
-  CartesianGrid
+  CartesianGrid,
+  AreaChart,
+  Area,
+  LineChart,
+  Line
 } from 'recharts';
 
 export default function CostAnalysisPage() {
@@ -80,13 +84,17 @@ export default function CostAnalysisPage() {
     wasted: s.unusedMonthlyCost,
   }));
 
-  // Multi-year comparison chart dataset
+  // Multi-year comparison chart dataset (Actual Expenditure & Recovery)
   const multiYearChartData = (yearlyData?.years || []).map((y: any) => ({
     year: y.year.toString(),
     investment: y.totalInvestment,
     realized: y.realizedValue,
     unrecovered: y.unrecoveredCost,
     rate: y.recoveryPercentage,
+    verifiedRealizedSavings: y.verifiedRealizedSavings || 0,
+    potentialAnnualSavings: y.potentialAnnualSavings || y.unrecoveredCost || 0,
+    expenditureBeforeOptimization: y.expenditureBeforeOptimization || y.totalInvestment,
+    expenditureAfterOptimization: y.expenditureAfterOptimization || (y.totalInvestment - (y.verifiedRealizedSavings || 0)),
   }));
 
   // Selected year metrics
@@ -95,9 +103,16 @@ export default function CostAnalysisPage() {
     realizedValue: 0,
     unrecoveredCost: 0,
     recoveryPercentage: 0,
+    verifiedRealizedSavings: 0,
+    potentialAnnualSavings: 0,
+    expenditureBeforeOptimization: 0,
+    expenditureAfterOptimization: 0,
+    savingsPercentage: 0,
+    dataCompleteness: 'MISSING',
   };
 
   const currentYearSoftwareList = yearlyData?.softwareByYear?.[selectedYear] || [];
+  const currentYearDepartmentList = yearlyData?.departmentByYear?.[selectedYear] || [];
 
   // Group by category for donut chart
   const categoryMap = new Map<string, number>();
@@ -109,6 +124,35 @@ export default function CostAnalysisPage() {
   const categoryPieData = Array.from(categoryMap.entries()).map(([name, value]) => ({
     name,
     value,
+  }));
+
+  // Monthly Spending vs Savings dataset from real CostRecord ledger
+  const monthlyTrendData = (yearlyData?.monthlySpendingAndSavings || []).map((m: any) => ({
+    month: m.label,
+    spending: m.spending,
+    savings: m.savings, // Realized productive value
+    potentialSavings: m.potentialSavings, // Unused / recoverable cost
+    savingsRate: m.savingsRate,
+  }));
+
+  // Savings Breakdown by Software (Verified vs Potential Savings)
+  const softwareSavingsBreakdown = softwareBreakdown.map((s: any) => ({
+    name: s.softwareName.length > 14 ? s.softwareName.substring(0, 14) + '...' : s.softwareName,
+    fullName: s.softwareName,
+    category: s.category,
+    // Realized savings from optimized productive seats
+    realizedAnnualSavings: Math.round((s.monthlyCost - s.unusedMonthlyCost) * (s.billingFrequency === 'ANNUAL' ? 1 : 12)),
+    // Potential savings recoverable from idle seats
+    potentialAnnualSavings: s.potentialAnnualSaving || 0,
+    annualCost: s.annualCost,
+  }));
+
+  // Savings Breakdown by Department
+  const departmentSavingsBreakdown = departmentBreakdown.map((d: any) => ({
+    name: d.departmentCode,
+    fullName: d.departmentName,
+    actualAnnualSpend: d.actualAnnualSpend,
+    budgetUtilizationRate: d.budgetUtilizationRate,
   }));
 
   const COLORS = ['#2563EB', '#0284C7', '#0D9488', '#F59E0B', '#8B5CF6', '#EC4899', '#6366F1'];
@@ -180,15 +224,15 @@ export default function CostAnalysisPage() {
           <div className="p-4 rounded-2xl bg-blue-50/70 border border-blue-100 flex items-start gap-3">
             <Info className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
             <div className="text-xs text-blue-900">
-              <div className="font-bold">Monthly Financial Calculation Formulas:</div>
+              <div className="font-bold">Frequency-Aware Financial Calculation Formulas:</div>
               <div className="font-mono text-[11px] mt-0.5 text-blue-800">
-                Monthly Cost = Total Licenses × Cost Per License
+                Monthly Subscriptions: Monthly = Seats × Price | Annual Recurring = Monthly × 12
               </div>
               <div className="font-mono text-[11px] text-blue-800">
-                Unused Monthly Cost = Unused Licenses × Cost Per License
+                Annual Subscriptions: Annual = Seats × Price | Monthly Equivalent = Annual ÷ 12
               </div>
               <div className="font-mono text-[11px] text-blue-800">
-                Potential Annual Saving = Unused Monthly Cost × 12
+                Potential Annual Savings = Sum of Idle Seats × Annualized Recurring Seat Cost
               </div>
             </div>
           </div>
@@ -236,7 +280,7 @@ export default function CostAnalysisPage() {
             </div>
           </div>
 
-          {/* Monthly Charts */}
+          {/* Monthly Charts Row 1: Donut + Productive vs Idle */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Category Spend Donut */}
             <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm">
@@ -301,6 +345,95 @@ export default function CostAnalysisPage() {
                   </BarChart>
                 </ResponsiveContainer>
               </div>
+            </div>
+          </div>
+
+          {/* Monthly Charts Row 2: Monthly Spending vs Savings Bar Chart & Spending Trend Line/Area Chart */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Graph 1: Monthly Spending vs Savings Graph */}
+            <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900">
+                    1. Monthly Spending vs Savings (₹)
+                  </h2>
+                  <p className="text-[10px] text-slate-500">
+                    Side-by-side comparison of monthly expenditure against realized savings
+                  </p>
+                </div>
+                <span className="px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold self-start">
+                  All Tracked Months
+                </span>
+              </div>
+
+              {monthlyTrendData.length > 0 ? (
+                <div className="h-64 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={monthlyTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                      <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#64748B' }} />
+                      <YAxis tick={{ fontSize: 11, fill: '#64748B' }} tickFormatter={(v) => `₹${v / 1000}k`} />
+                      <Tooltip
+                        formatter={(v: any) => [formatINR(v)]}
+                        contentStyle={{ borderRadius: '12px', fontSize: '11px', border: '1px solid #E2E8F0' }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                      <Bar dataKey="spending" fill="#0F172A" name="Monthly Spending" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="savings" fill="#10B981" name="Monthly Savings" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="h-64 flex flex-col items-center justify-center text-slate-400 text-xs">
+                  <p>Historical monthly records accumulating in PostgreSQL ledger.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Graph 3: Spending Trend Graph */}
+            <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900">
+                    3. Monthly Spending Trend & Outlier Analysis (₹)
+                  </h2>
+                  <p className="text-[10px] text-slate-500">
+                    Continuous spending trajectory highlighting months with peak expenditure
+                  </p>
+                </div>
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold self-start">
+                  Trajectory
+                </span>
+              </div>
+
+              {monthlyTrendData.length > 0 ? (
+                <div className="h-64 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={monthlyTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="spendGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#2563EB" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="#2563EB" stopOpacity={0.0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                      <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#64748B' }} />
+                      <YAxis tick={{ fontSize: 11, fill: '#64748B' }} tickFormatter={(v) => `₹${v / 1000}k`} />
+                      <Tooltip
+                        formatter={(v: any) => [formatINR(v)]}
+                        contentStyle={{ borderRadius: '12px', fontSize: '11px', border: '1px solid #E2E8F0' }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                      <Area type="monotone" dataKey="spending" stroke="#2563EB" strokeWidth={2.5} fillOpacity={1} fill="url(#spendGradient)" name="Monthly Expenditure" />
+                      <Line type="monotone" dataKey="savings" stroke="#10B981" strokeWidth={2} dot={{ r: 3 }} name="Monthly Savings" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="h-64 flex flex-col items-center justify-center text-slate-400 text-xs">
+                  <p>Historical spending trend accumulating.</p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -413,91 +546,235 @@ export default function CostAnalysisPage() {
             </div>
           </div>
 
-          {/* 4 Yearly Financial KPIs for the selected year */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-sm">
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                {selectedYear} Total Investment
+          {/* 6 Yearly Financial KPIs for the selected year */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-2xs">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block truncate">
+                {selectedYear} Total Spend
               </span>
-              <div className="text-2xl font-bold text-slate-900 mt-1">
+              <div className="text-xl font-bold text-slate-900 mt-1">
                 {formatINR(currentYearMetric.totalInvestment)}
               </div>
-              <div className="text-[11px] text-slate-400 mt-0.5">
-                Total software capital deployed
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                {currentYearMetric.dataCompleteness === 'COMPLETE' ? 'Full fiscal year' : 'Recorded ledger'}
               </div>
             </div>
 
-            <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-sm">
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                {selectedYear} Realized Value (Recovery)
+            <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-2xs">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block truncate">
+                Before Optimization
               </span>
-              <div className="text-2xl font-bold text-emerald-600 mt-1">
-                {formatINR(currentYearMetric.realizedValue)}
+              <div className="text-xl font-bold text-slate-900 mt-1">
+                {formatINR(currentYearMetric.expenditureBeforeOptimization)}
               </div>
-              <div className="text-[11px] text-emerald-700 font-bold mt-0.5">
-                {currentYearMetric.recoveryPercentage}% Capital Recovery Rate
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                Baseline expenditure
               </div>
             </div>
 
-            <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-sm">
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                {selectedYear} Unrecovered Cost
+            <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-2xs">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block truncate">
+                After Optimization
               </span>
-              <div className="text-2xl font-bold text-rose-600 mt-1">
-                {formatINR(currentYearMetric.unrecoveredCost)}
+              <div className="text-xl font-bold text-blue-600 mt-1">
+                {formatINR(currentYearMetric.expenditureAfterOptimization)}
               </div>
-              <div className="text-[11px] text-rose-500 font-medium mt-0.5">
-                {currentYearMetric.unrecoveredPercentage || (100 - currentYearMetric.recoveryPercentage).toFixed(1)}% unrecovered capital
+              <div className="text-[10px] text-blue-500 font-medium mt-0.5">
+                Post-reduction spend
               </div>
             </div>
 
-            <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-sm">
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                YoY Capital Trajectory
+            <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-2xs">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block truncate">
+                Verified Realized Savings
               </span>
-              <div className="text-2xl font-bold text-blue-600 mt-1">
-                +{yearlyData?.yoyImprovement?.totalRecoveryPointsImprovement || 10.3}% pts
+              <div className="text-xl font-bold text-emerald-600 mt-1">
+                {formatINR(currentYearMetric.verifiedRealizedSavings)}
               </div>
-              <div className="text-[11px] text-slate-500 font-medium mt-0.5">
-                2024 (65%) → 2025 (76%) → 2026 ({yearlyData?.latestYear?.recoveryPercentage || 75.3}%)
+              <div className="text-[10px] text-emerald-600 font-bold mt-0.5">
+                {currentYearMetric.savingsPercentage}% baseline saved
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-2xs">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block truncate">
+                Potential Savings
+              </span>
+              <div className="text-xl font-bold text-amber-600 mt-1">
+                {formatINR(currentYearMetric.potentialAnnualSavings)}
+              </div>
+              <div className="text-[10px] text-amber-600 font-medium mt-0.5">
+                Identified idle seats
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-2xs">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block truncate">
+                Capital Recovery Rate
+              </span>
+              <div className="text-xl font-bold text-slate-900 mt-1">
+                {currentYearMetric.recoveryPercentage}%
+              </div>
+              <div className="text-[10px] text-emerald-600 font-medium mt-0.5">
+                +{yearlyData?.yoyImprovement?.totalRecoveryPointsImprovement || 10.3}% pts YoY
               </div>
             </div>
           </div>
 
-          {/* Multi-Year Comparison Chart */}
+          {/* Grid of Visualizations: Chart A (Multi-Year Capital) + Chart B (Savings Trend & Before vs After) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Chart A: Multi-Year Capital Investment vs Realized Value */}
+            <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900">
+                    2. Yearly Spending vs Savings Graph (₹)
+                  </h2>
+                  <p className="text-[10px] text-slate-500">
+                    Year-by-year comparison across 2024, 2025, and 2026 showing capital recovery progression
+                  </p>
+                </div>
+                <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 text-[10px] font-bold self-start">
+                  Actual Recorded Ledger
+                </span>
+              </div>
+
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={multiYearChartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                    <XAxis dataKey="year" tick={{ fontSize: 11, fill: '#0F172A', fontWeight: 600 }} />
+                    <YAxis tick={{ fontSize: 11, fill: '#64748B' }} tickFormatter={(v) => `₹${v / 1000}k`} />
+                    <Tooltip
+                      formatter={(v: any) => [formatINR(v)]}
+                      contentStyle={{ borderRadius: '12px', fontSize: '11px', border: '1px solid #E2E8F0' }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                    <Bar dataKey="investment" fill="#0F172A" name="Total Expenditure" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="realized" fill="#10B981" name="Realized Value (Productive)" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="unrecovered" fill="#EF4444" name="Unrecovered Cost" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Chart B: Before vs After Optimization & Savings Progression */}
+            <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900">
+                    5. Before vs After Optimization Impact (₹)
+                  </h2>
+                  <p className="text-[10px] text-slate-500">
+                    Comparable baseline expenditure versus realized expenditure after license optimization
+                  </p>
+                </div>
+                <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold self-start">
+                  Verified vs Potential Savings
+                </span>
+              </div>
+
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={multiYearChartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                    <XAxis dataKey="year" tick={{ fontSize: 11, fill: '#0F172A', fontWeight: 600 }} />
+                    <YAxis tick={{ fontSize: 11, fill: '#64748B' }} tickFormatter={(v) => `₹${v / 1000}k`} />
+                    <Tooltip
+                      formatter={(v: any) => [formatINR(v)]}
+                      contentStyle={{ borderRadius: '12px', fontSize: '11px', border: '1px solid #E2E8F0' }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                    <Bar dataKey="expenditureBeforeOptimization" fill="#64748B" name="Before Optimization" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="expenditureAfterOptimization" fill="#2563EB" name="After Optimization" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="verifiedRealizedSavings" fill="#10B981" name="Verified Realized Savings" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="potentialAnnualSavings" fill="#F59E0B" name="Potential Savings Remaining" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+
+          {/* Graph 4: Savings Breakdown Graph (Verified vs Potential Savings by Software Product) */}
           <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
               <div>
                 <h2 className="text-sm font-bold text-slate-900">
-                  Multi-Year Capital Investment vs Realized Value (₹)
+                  4. Savings Breakdown Graph: Productive Value vs Potential Savings (₹)
                 </h2>
                 <p className="text-[10px] text-slate-500">
-                  Annual comparison across 2024, 2025, and 2026 showing capital recovery efficiency progression
+                  Software-by-software comparison clearly separating productive utilized value from unrecovered potential savings
                 </p>
               </div>
-              <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold self-start">
-                +10.3% Recovery Points Trajectory
+              <span className="px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 text-[10px] font-bold self-start">
+                Categorized by Tool
               </span>
             </div>
 
-            <div className="h-72 w-full">
+            <div className="h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={multiYearChartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                <BarChart data={softwareSavingsBreakdown} margin={{ top: 10, right: 10, left: 10, bottom: 25 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
-                  <XAxis dataKey="year" tick={{ fontSize: 11, fill: '#0F172A', fontWeight: 600 }} />
+                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#64748B' }} angle={-15} textAnchor="end" />
                   <YAxis tick={{ fontSize: 11, fill: '#64748B' }} tickFormatter={(v) => `₹${v / 1000}k`} />
                   <Tooltip
-                    formatter={(v: any) => [formatINR(v)]}
-                    contentStyle={{ borderRadius: '12px', fontSize: '11px', border: '1px solid #E2E8F0' }}
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const d = payload[0].payload;
+                        return (
+                          <div className="bg-slate-900 text-white text-xs p-3 rounded-xl shadow-lg border border-slate-700 space-y-1">
+                            <p className="font-bold text-sm">{d.fullName} ({d.category})</p>
+                            <p className="text-emerald-400">Productive Utilized: {formatINR(d.realizedAnnualSavings)} / yr</p>
+                            <p className="text-amber-400">Potential Savings: {formatINR(d.potentialAnnualSavings)} / yr</p>
+                            <p className="text-slate-300">Total Contract: {formatINR(d.annualCost)} / yr</p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
                   />
                   <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-                  <Bar dataKey="investment" fill="#0F172A" name="Total Capital Investment" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="realized" fill="#10B981" name="Realized Value (Recovered)" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="unrecovered" fill="#EF4444" name="Unrecovered Cost" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="realizedAnnualSavings" fill="#10B981" name="Productive Value" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="potentialAnnualSavings" fill="#F59E0B" name="Potential Savings (Idle Seats)" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
           </div>
+
+          {/* Department-wise Annual Expenditure */}
+          {currentYearDepartmentList.length > 0 && (
+            <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900">
+                    Department-Wise Software Spend ({selectedYear})
+                  </h2>
+                  <p className="text-[10px] text-slate-500">
+                    Annual cost allocation across internal business departments for fiscal year {selectedYear}
+                  </p>
+                </div>
+                <span className="text-[11px] font-semibold text-slate-500">
+                  {currentYearDepartmentList.length} departments recorded
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+                {currentYearDepartmentList.map((dept: any) => (
+                  <div key={dept.departmentId} className="p-4 rounded-2xl bg-slate-50 border border-slate-100">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                      {dept.departmentCode}
+                    </span>
+                    <div className="text-sm font-bold text-slate-900 truncate mt-0.5">
+                      {dept.departmentName}
+                    </div>
+                    <div className="text-base font-extrabold text-blue-600 mt-2">
+                      {formatINR(dept.totalSpend)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Detailed Yearly Software Ledger Table */}
           <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden">

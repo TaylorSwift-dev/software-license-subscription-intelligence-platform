@@ -40,6 +40,10 @@ export default function SoftwarePage() {
     description: '',
     version: '1.0',
     website: '',
+    consumptionType: 'SEAT_BASED',
+    billingFrequency: 'MONTHLY',
+    allocatedTokens: 10000000,
+    tokenUnitCost: 0.002,
     initialLicenses: 10,
     costPerLicense: 1000,
   });
@@ -468,29 +472,86 @@ export default function SoftwarePage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="font-semibold text-slate-700 block mb-1">Initial Seats</label>
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={formData.initialLicenses}
-                    onChange={(e) => setFormData({ ...formData, initialLicenses: parseInt(e.target.value) || 1 })}
+                  <label className="font-semibold text-slate-700 block mb-1">Consumption Model</label>
+                  <select
+                    value={formData.consumptionType}
+                    onChange={(e) => setFormData({ ...formData, consumptionType: e.target.value })}
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200"
-                  />
+                  >
+                    <option value="SEAT_BASED">Seat Based</option>
+                    <option value="TOKEN_BASED">Token / Credit Based</option>
+                  </select>
                 </div>
 
                 <div>
-                  <label className="font-semibold text-slate-700 block mb-1">Cost Per Seat / Month (₹)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    required
-                    value={formData.costPerLicense}
-                    onChange={(e) => setFormData({ ...formData, costPerLicense: parseFloat(e.target.value) || 0 })}
+                  <label className="font-semibold text-slate-700 block mb-1">Billing Frequency</label>
+                  <select
+                    value={formData.billingFrequency}
+                    onChange={(e) => setFormData({ ...formData, billingFrequency: e.target.value })}
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200"
-                  />
+                  >
+                    <option value="MONTHLY">Monthly</option>
+                    <option value="ANNUAL">Annual</option>
+                    <option value="ONE_TIME">One-Time</option>
+                  </select>
                 </div>
               </div>
+
+              {formData.consumptionType === 'TOKEN_BASED' ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-semibold text-slate-700 block mb-1">Allocated Token Quota</label>
+                    <input
+                      type="number"
+                      min="1"
+                      required
+                      value={formData.allocatedTokens}
+                      onChange={(e) => setFormData({ ...formData, allocatedTokens: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-semibold text-slate-700 block mb-1">Unit Cost / Token (₹)</label>
+                    <input
+                      type="number"
+                      step="0.0001"
+                      min="0"
+                      required
+                      value={formData.tokenUnitCost}
+                      onChange={(e) => setFormData({ ...formData, tokenUnitCost: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-semibold text-slate-700 block mb-1">Initial Seats</label>
+                    <input
+                      type="number"
+                      min="1"
+                      required
+                      value={formData.initialLicenses}
+                      onChange={(e) => setFormData({ ...formData, initialLicenses: parseInt(e.target.value) || 1 })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-semibold text-slate-700 block mb-1">
+                      Price / Seat {formData.billingFrequency === 'ANNUAL' ? '/ Yr' : formData.billingFrequency === 'ONE_TIME' ? 'One-time' : '/ Mo'} (₹)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      required
+                      value={formData.costPerLicense}
+                      onChange={(e) => setFormData({ ...formData, costPerLicense: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200"
+                    />
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="font-semibold text-slate-700 block mb-1">Website URL</label>

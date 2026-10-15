@@ -83,6 +83,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           });
 
           if (!existingAssignment) {
+            await tx.licenseAssignment.deleteMany({
+              where: {
+                licenseId: selectedLicense.id,
+                userId: request.userId,
+                status: AssignmentStatus.REVOKED,
+              },
+            });
+
             await tx.licenseAssignment.create({
               data: {
                 licenseId: selectedLicense.id,
@@ -94,17 +102,36 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
             });
           }
 
-          // Create usage record
-          await tx.usageRecord.create({
-            data: {
+          // Update existing usage record or create if not present
+          const existingUsage = await tx.usageRecord.findFirst({
+            where: {
               userId: request.userId,
               softwareId: request.softwareId,
-              licenseId: selectedLicense.id,
-              loginCount: 1,
-              hoursUsed: 1.0,
-              utilizationStatus: 'MODERATE',
             },
           });
+
+          if (existingUsage) {
+            await tx.usageRecord.update({
+              where: { id: existingUsage.id },
+              data: {
+                licenseId: selectedLicense.id,
+                lastActiveDate: new Date(),
+                loginCount: { increment: 1 },
+                hoursUsed: { increment: 1.0 },
+              },
+            });
+          } else {
+            await tx.usageRecord.create({
+              data: {
+                userId: request.userId,
+                softwareId: request.softwareId,
+                licenseId: selectedLicense.id,
+                loginCount: 1,
+                hoursUsed: 1.0,
+                utilizationStatus: 'MODERATE',
+              },
+            });
+          }
         } else {
           // No unused license in pool -> Approve for procurement
           finalStatus = RequestStatus.APPROVED;

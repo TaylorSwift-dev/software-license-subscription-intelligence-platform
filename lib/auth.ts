@@ -3,7 +3,17 @@ import bcrypt from 'bcryptjs';
 import { NextRequest, NextResponse } from 'next/server';
 import { Role } from '@prisma/client';
 
-const JWT_SECRET = process.env.AUTH_SECRET || 'fep-software-license-intelligence-secure-jwt-secret-2026';
+function getJwtSecret(): string {
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('AUTH_SECRET environment variable is strictly required in production mode');
+    }
+    return 'fep-software-license-intelligence-secure-jwt-secret-2026';
+  }
+  return secret;
+}
+
 const TOKEN_NAME = 'auth_token';
 
 export interface TokenPayload {
@@ -23,12 +33,12 @@ export async function comparePassword(password: string, hash: string): Promise<b
 }
 
 export function signToken(payload: TokenPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+  return jwt.sign(payload, getJwtSecret(), { expiresIn: '7d' });
 }
 
 export function verifyToken(token: string): TokenPayload | null {
   try {
-    return jwt.verify(token, JWT_SECRET) as TokenPayload;
+    return jwt.verify(token, getJwtSecret()) as TokenPayload;
   } catch (error) {
     return null;
   }

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import {
   Settings,
@@ -21,10 +21,38 @@ export default function SettingsPage() {
   const [threshold, setThreshold] = useState(70);
   const [currency, setCurrency] = useState('INR');
 
-  const handleSave = (e: React.FormEvent) => {
+  useEffect(() => {
+    fetch('/api/settings')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.settings) {
+          if (data.settings.underutilizationThreshold) {
+            setThreshold(data.settings.underutilizationThreshold);
+          }
+          if (data.settings.currency) {
+            setCurrency(data.settings.currency);
+          }
+        }
+      })
+      .catch((err) => console.error('Error fetching settings:', err));
+  }, []);
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+    try {
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          underutilizationThreshold: threshold,
+          currency,
+        }),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      console.error('Error saving settings:', err);
+    }
   };
 
   return (

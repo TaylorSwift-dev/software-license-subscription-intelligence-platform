@@ -21,6 +21,16 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       return NextResponse.json({ success: false, error: 'Assignment not found' }, { status: 404 });
     }
 
+    // Prevent @@unique([licenseId, userId, status]) conflict by clearing any older revoked record
+    await prisma.licenseAssignment.deleteMany({
+      where: {
+        licenseId: existing.licenseId,
+        userId: existing.userId,
+        status: AssignmentStatus.REVOKED,
+        id: { not: params.id },
+      },
+    });
+
     await prisma.licenseAssignment.update({
       where: { id: params.id },
       data: { status: AssignmentStatus.REVOKED },

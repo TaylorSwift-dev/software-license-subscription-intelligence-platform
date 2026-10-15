@@ -27,7 +27,12 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  Cell
+  Cell,
+  Legend,
+  CartesianGrid,
+  AreaChart,
+  Area,
+  Line
 } from 'recharts';
 
 export default function DashboardPage() {
@@ -112,8 +117,24 @@ export default function DashboardPage() {
   const departmentData = (analytics?.departmentBreakdown || []).map((d: any) => ({
     name: d.departmentCode,
     fullName: d.departmentName,
-    spend: Math.round(financialView === 'yearly' ? d.actualMonthlySpend * 12 : d.actualMonthlySpend),
+    spend: Math.round(financialView === 'yearly' ? (d.actualAnnualSpend ?? d.actualMonthlySpend * 12) : d.actualMonthlySpend),
     budget: Math.round(financialView === 'yearly' ? d.monthlyBudget * 12 : d.monthlyBudget),
+  }));
+
+  // Monthly Spending vs Savings dataset
+  const monthlyTrendData = (yearlyRecovery?.monthlySpendingAndSavings || []).map((m: any) => ({
+    month: m.label,
+    spending: m.spending,
+    savings: m.savings,
+  }));
+
+  // Multi-Year Spending vs Savings dataset
+  const multiYearChartData = (yearlyRecovery?.years || []).map((y: any) => ({
+    year: y.year.toString(),
+    spending: y.totalInvestment,
+    savings: y.realizedValue,
+    recoveryRate: y.recoveryPercentage,
+    verifiedSavings: y.verifiedRealizedSavings || 0,
   }));
 
   // Calendar setup for October 2026 (matching media_1791173942344.jpg)
@@ -128,7 +149,15 @@ export default function DashboardPage() {
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDayIndex = (new Date(year, month, 1).getDay() + 6) % 7; // Monday = 0
 
-  const activeRenewalDays = [16, 17, 24]; // Highlighting active renewal milestones
+  // Dynamically derive renewal milestones from live renewal schedule
+  const renewalDatesInMonth = renewals
+    .filter((r: any) => {
+      const d = new Date(r.renewalDate);
+      return d.getFullYear() === year && d.getMonth() === month;
+    })
+    .map((r: any) => new Date(r.renewalDate).getDate());
+
+  const activeRenewalDays = renewalDatesInMonth.length > 0 ? renewalDatesInMonth : [16, 17, 24];
 
   return (
     <div className="space-y-6 lg:space-y-8 animate-in fade-in duration-300">
@@ -172,18 +201,42 @@ export default function DashboardPage() {
                 {/* Top: Star rating / utilization pill */}
                 <div className="flex items-center justify-between">
                   <div className="flex -space-x-2 overflow-hidden">
-                    <div className="inline-block h-7 w-7 rounded-full ring-2 ring-white bg-slate-800 text-[10px] text-white font-bold flex items-center justify-center">
-                      AC
-                    </div>
-                    <div className="inline-block h-7 w-7 rounded-full ring-2 ring-white bg-teal-600 text-[10px] text-white font-bold flex items-center justify-center">
-                      JS
-                    </div>
-                    <div className="inline-block h-7 w-7 rounded-full ring-2 ring-white bg-emerald-500 text-[10px] text-white font-bold flex items-center justify-center">
-                      PK
-                    </div>
-                    <div className="inline-block h-7 w-7 rounded-full ring-2 ring-white bg-white text-[10px] text-slate-700 font-bold flex items-center justify-center shadow-xs">
-                      +32
-                    </div>
+                    {topSoftware[0]?.assignedUsers && topSoftware[0].assignedUsers.length > 0 ? (
+                      <>
+                        {topSoftware[0].assignedUsers.slice(0, 3).map((u: any, idx: number) => {
+                          const bgColors = ['bg-slate-800', 'bg-teal-600', 'bg-emerald-500'];
+                          return (
+                            <div
+                              key={u.id || idx}
+                              title={`${u.name} (${u.email})`}
+                              className={`inline-block h-7 w-7 rounded-full ring-2 ring-white ${bgColors[idx % bgColors.length]} text-[10px] text-white font-bold flex items-center justify-center`}
+                            >
+                              {u.initials || 'U'}
+                            </div>
+                          );
+                        })}
+                        {topSoftware[0].assignedUsers.length > 3 && (
+                          <div className="inline-block h-7 w-7 rounded-full ring-2 ring-white bg-white text-[10px] text-slate-700 font-bold flex items-center justify-center shadow-xs">
+                            +{topSoftware[0].assignedUsers.length - 3}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div className="inline-block h-7 w-7 rounded-full ring-2 ring-white bg-slate-800 text-[10px] text-white font-bold flex items-center justify-center">
+                          AC
+                        </div>
+                        <div className="inline-block h-7 w-7 rounded-full ring-2 ring-white bg-teal-600 text-[10px] text-white font-bold flex items-center justify-center">
+                          JS
+                        </div>
+                        <div className="inline-block h-7 w-7 rounded-full ring-2 ring-white bg-emerald-500 text-[10px] text-white font-bold flex items-center justify-center">
+                          PK
+                        </div>
+                        <div className="inline-block h-7 w-7 rounded-full ring-2 ring-white bg-white text-[10px] text-slate-700 font-bold flex items-center justify-center shadow-xs">
+                          +{Math.max(0, (topSoftware[0]?.activeLicenses || 35) - 3)}
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   <div className="px-2.5 py-1 rounded-full bg-white/80 backdrop-blur-xs text-[11px] font-bold text-slate-800 shadow-2xs flex items-center gap-1">
@@ -217,18 +270,42 @@ export default function DashboardPage() {
                 {/* Top: Star rating / utilization pill */}
                 <div className="flex items-center justify-between">
                   <div className="flex -space-x-2 overflow-hidden">
-                    <div className="inline-block h-7 w-7 rounded-full ring-2 ring-white bg-indigo-700 text-[10px] text-white font-bold flex items-center justify-center">
-                      MS
-                    </div>
-                    <div className="inline-block h-7 w-7 rounded-full ring-2 ring-white bg-rose-500 text-[10px] text-white font-bold flex items-center justify-center">
-                      EL
-                    </div>
-                    <div className="inline-block h-7 w-7 rounded-full ring-2 ring-white bg-amber-500 text-[10px] text-white font-bold flex items-center justify-center">
-                      RD
-                    </div>
-                    <div className="inline-block h-7 w-7 rounded-full ring-2 ring-white bg-white text-[10px] text-slate-700 font-bold flex items-center justify-center shadow-xs">
-                      +26
-                    </div>
+                    {topSoftware[1]?.assignedUsers && topSoftware[1].assignedUsers.length > 0 ? (
+                      <>
+                        {topSoftware[1].assignedUsers.slice(0, 3).map((u: any, idx: number) => {
+                          const bgColors = ['bg-indigo-700', 'bg-rose-500', 'bg-amber-500'];
+                          return (
+                            <div
+                              key={u.id || idx}
+                              title={`${u.name} (${u.email})`}
+                              className={`inline-block h-7 w-7 rounded-full ring-2 ring-white ${bgColors[idx % bgColors.length]} text-[10px] text-white font-bold flex items-center justify-center`}
+                            >
+                              {u.initials || 'U'}
+                            </div>
+                          );
+                        })}
+                        {topSoftware[1].assignedUsers.length > 3 && (
+                          <div className="inline-block h-7 w-7 rounded-full ring-2 ring-white bg-white text-[10px] text-slate-700 font-bold flex items-center justify-center shadow-xs">
+                            +{topSoftware[1].assignedUsers.length - 3}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div className="inline-block h-7 w-7 rounded-full ring-2 ring-white bg-indigo-700 text-[10px] text-white font-bold flex items-center justify-center">
+                          MS
+                        </div>
+                        <div className="inline-block h-7 w-7 rounded-full ring-2 ring-white bg-rose-500 text-[10px] text-white font-bold flex items-center justify-center">
+                          EL
+                        </div>
+                        <div className="inline-block h-7 w-7 rounded-full ring-2 ring-white bg-amber-500 text-[10px] text-white font-bold flex items-center justify-center">
+                          RD
+                        </div>
+                        <div className="inline-block h-7 w-7 rounded-full ring-2 ring-white bg-white text-[10px] text-slate-700 font-bold flex items-center justify-center shadow-xs">
+                          +{Math.max(0, (topSoftware[1]?.activeLicenses || 28) - 3)}
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   <div className="px-2.5 py-1 rounded-full bg-white/80 backdrop-blur-xs text-[11px] font-bold text-slate-800 shadow-2xs flex items-center gap-1">
@@ -433,13 +510,13 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between text-xs font-semibold mt-2 text-slate-700">
                 {financialView === 'yearly' ? (
                   <>
-                    <span>Recovered: {formatINR(yearlyRecovery?.latestYear?.realizedValue || 965984)} ({yearlyRecovery?.latestYear?.recoveryPercentage || 75.3}%)</span>
-                    <span className="text-amber-800 font-bold">Unrecovered: {formatINR(yearlyRecovery?.latestYear?.unrecoveredCost || 317116)}</span>
+                    <span>Saved: {formatINR(yearlyRecovery?.summary?.verifiedRealizedSavings ?? yearlyRecovery?.verifiedRealizedAnnualSavings ?? 0)} | Recovered: {formatINR(yearlyRecovery?.latestYear?.realizedValue ?? 965984)} ({yearlyRecovery?.latestYear?.recoveryPercentage ?? 75.3}%)</span>
+                    <span className="text-amber-800 font-bold">Potential: {formatINR(yearlyRecovery?.summary?.potentialAnnualSavings ?? yearlyRecovery?.potentialUnrealizedAnnualSavings ?? analytics?.potentialAnnualSavings ?? 317116)} / yr</span>
                   </>
                 ) : (
                   <>
-                    <span>Active: {formatINR((analytics?.totalMonthlyCost || 320000) - (analytics?.unusedMonthlyCost || 75000))}</span>
-                    <span className="text-amber-800 font-bold">Reclaimable: {formatINR(analytics?.unusedMonthlyCost || 75000)} / mo</span>
+                    <span>Active: {formatINR((analytics?.totalMonthlyCost ?? analytics?.monthlyExpenditure ?? 320000) - (analytics?.unusedMonthlyCost ?? analytics?.potentialMonthlySavings ?? 75000))}</span>
+                    <span className="text-amber-800 font-bold">Reclaimable: {formatINR(analytics?.unusedMonthlyCost ?? analytics?.potentialMonthlySavings ?? 75000)} / mo</span>
                   </>
                 )}
               </div>
@@ -488,8 +565,8 @@ export default function DashboardPage() {
                         return (
                           <div className="bg-slate-900 text-white text-xs p-2.5 rounded-xl shadow-lg border border-slate-700">
                             <p className="font-bold">{data.fullName} ({data.name})</p>
-                            <p className="text-cyan-300 mt-1">Spend: {formatINR(data.spend)} / mo</p>
-                            <p className="text-slate-300">Budget: {formatINR(data.budget)} / mo</p>
+                            <p className="text-cyan-300 mt-1">Spend: {formatINR(data.spend)} / {financialView === 'yearly' ? 'yr' : 'mo'}</p>
+                            <p className="text-slate-300">Budget: {formatINR(data.budget)} / {financialView === 'yearly' ? 'yr' : 'mo'}</p>
                           </div>
                         );
                       }
@@ -503,6 +580,74 @@ export default function DashboardPage() {
                     })}
                   </Bar>
                 </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* SECTION 5: Interactive Spending vs Savings Trajectory Chart */}
+          <div className="p-6 rounded-[30px] bg-white border border-slate-100 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  Financial Performance Trajectory
+                </span>
+                <h3 className="text-base font-bold text-slate-900">
+                  {financialView === 'yearly' ? 'Yearly Spending vs Realized Savings' : 'Monthly Spending vs Realized Savings'}
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-100">
+                  {financialView === 'yearly' ? '2024–2026 Fiscal Ledger' : 'Active Months'}
+                </span>
+                <Link
+                  href="/analytics/costs"
+                  className="text-xs font-semibold text-slate-500 hover:text-slate-900 transition flex items-center gap-1"
+                >
+                  <span>Full Ledger</span>
+                  <ChevronRight className="w-3 h-3" />
+                </Link>
+              </div>
+            </div>
+
+            <div className="h-56 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                {financialView === 'yearly' ? (
+                  <BarChart data={multiYearChartData} barSize={22} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F8FAFC" />
+                    <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 11, fontWeight: 600 }} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} tickFormatter={(v) => `₹${Math.round(v / 1000)}k`} />
+                    <Tooltip
+                      formatter={(v: any, name: any) => [formatINR(v), name === 'spending' ? 'Total Expenditure' : 'Realized Savings']}
+                      contentStyle={{ borderRadius: '12px', fontSize: '11px', border: '1px solid #E2E8F0', backgroundColor: '#0F172A', color: '#FFF' }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+                    <Bar dataKey="spending" fill="#0F172A" name="Total Expenditure" radius={[6, 6, 0, 0]} />
+                    <Bar dataKey="savings" fill="#10B981" name="Realized Savings" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                ) : (
+                  <AreaChart data={monthlyTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="dashSpendGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#0F172A" stopOpacity={0.25}/>
+                        <stop offset="95%" stopColor="#0F172A" stopOpacity={0.0}/>
+                      </linearGradient>
+                      <linearGradient id="dashSaveGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10B981" stopOpacity={0.25}/>
+                        <stop offset="95%" stopColor="#10B981" stopOpacity={0.0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F8FAFC" />
+                    <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 10 }} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 10 }} tickFormatter={(v) => `₹${Math.round(v / 1000)}k`} />
+                    <Tooltip
+                      formatter={(v: any, name: any) => [formatINR(v), name === 'spending' ? 'Monthly Spend' : 'Monthly Savings']}
+                      contentStyle={{ borderRadius: '12px', fontSize: '11px', border: '1px solid #E2E8F0', backgroundColor: '#0F172A', color: '#FFF' }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+                    <Area type="monotone" dataKey="spending" stroke="#0F172A" strokeWidth={2} fillOpacity={1} fill="url(#dashSpendGrad)" name="Monthly Spend" />
+                    <Area type="monotone" dataKey="savings" stroke="#10B981" strokeWidth={2} fillOpacity={1} fill="url(#dashSaveGrad)" name="Monthly Savings" />
+                  </AreaChart>
+                )}
               </ResponsiveContainer>
             </div>
           </div>
@@ -605,61 +750,89 @@ export default function DashboardPage() {
 
           {/* Upcoming Renewal Pills List (Matching media_1791173942344.jpg) */}
           <div className="space-y-3 pt-2">
-            
-            {/* Renewal Item 1: Pastel Mint */}
-            <Link
-              href="/renewals"
-              className="p-4 rounded-2xl bg-[#D7EFEA] hover:shadow-md transition flex items-center gap-3.5 group"
-            >
-              <div className="w-10 h-10 rounded-full bg-[#0F172A] text-white flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition">
-                <Calendar className="w-4 h-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <h4 className="text-xs font-bold text-slate-900 truncate">
-                  Adobe Creative Cloud — Annual Contract
-                </h4>
-                <p className="text-[11px] text-slate-600 truncate mt-0.5">
-                  Due in 18 days • 15 idle seats flagged
-                </p>
-              </div>
-            </Link>
+            {renewals.length > 0 ? (
+              renewals.slice(0, 3).map((ren: any, idx: number) => {
+                const daysUntil = ren.daysUntilRenewal ?? Math.ceil((new Date(ren.renewalDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                const icons = [Calendar, KeyRound, Sparkles];
+                const IconComponent = icons[idx % icons.length];
+                const dueText = daysUntil < 0 ? `Expired ${Math.abs(daysUntil)}d ago` : `Due in ${daysUntil} days`;
+                const idleText = ren.unusedQuantity > 0 ? `${ren.unusedQuantity} idle seats flagged` : `${ren.utilizationRate || 100}% utilization`;
 
-            {/* Renewal Item 2: Pastel Mint */}
-            <Link
-              href="/renewals"
-              className="p-4 rounded-2xl bg-[#D7EFEA] hover:shadow-md transition flex items-center gap-3.5 group"
-            >
-              <div className="w-10 h-10 rounded-full bg-[#0F172A] text-white flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition">
-                <KeyRound className="w-4 h-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <h4 className="text-xs font-bold text-slate-900 truncate">
-                  Slack Enterprise Grid — Q4 License Review
-                </h4>
-                <p className="text-[11px] text-slate-600 truncate mt-0.5">
-                  Due in 32 days • 45 active seats
-                </p>
-              </div>
-            </Link>
+                return (
+                  <Link
+                    key={ren.id || idx}
+                    href="/renewals"
+                    className="p-4 rounded-2xl bg-[#D7EFEA] hover:shadow-md transition flex items-center gap-3.5 group"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-[#0F172A] text-white flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition">
+                      <IconComponent className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h4 className="text-xs font-bold text-slate-900 truncate">
+                        {ren.software?.name || 'Software'} — {ren.license?.billingFrequency || 'Annual'} Contract
+                      </h4>
+                      <p className="text-[11px] text-slate-600 truncate mt-0.5">
+                        {dueText} • {idleText}
+                      </p>
+                    </div>
+                  </Link>
+                );
+              })
+            ) : (
+              <>
+                {/* Fallback default pills if database has no renewals */}
+                <Link
+                  href="/renewals"
+                  className="p-4 rounded-2xl bg-[#D7EFEA] hover:shadow-md transition flex items-center gap-3.5 group"
+                >
+                  <div className="w-10 h-10 rounded-full bg-[#0F172A] text-white flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition">
+                    <Calendar className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h4 className="text-xs font-bold text-slate-900 truncate">
+                      Adobe Creative Cloud — Annual Contract
+                    </h4>
+                    <p className="text-[11px] text-slate-600 truncate mt-0.5">
+                      Due in 18 days • 15 idle seats flagged
+                    </p>
+                  </div>
+                </Link>
 
-            {/* Renewal Item 3: Pastel Mint */}
-            <Link
-              href="/renewals"
-              className="p-4 rounded-2xl bg-[#D7EFEA] hover:shadow-md transition flex items-center gap-3.5 group"
-            >
-              <div className="w-10 h-10 rounded-full bg-[#0F172A] text-white flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition">
-                <Sparkles className="w-4 h-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <h4 className="text-xs font-bold text-slate-900 truncate">
-                  GitHub Enterprise — CoPilot Add-on Audit
-                </h4>
-                <p className="text-[11px] text-slate-600 truncate mt-0.5">
-                  Due in 45 days • 95% utilization
-                </p>
-              </div>
-            </Link>
+                <Link
+                  href="/renewals"
+                  className="p-4 rounded-2xl bg-[#D7EFEA] hover:shadow-md transition flex items-center gap-3.5 group"
+                >
+                  <div className="w-10 h-10 rounded-full bg-[#0F172A] text-white flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition">
+                    <KeyRound className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h4 className="text-xs font-bold text-slate-900 truncate">
+                      Slack Enterprise Grid — Q4 License Review
+                    </h4>
+                    <p className="text-[11px] text-slate-600 truncate mt-0.5">
+                      Due in 32 days • 45 active seats
+                    </p>
+                  </div>
+                </Link>
 
+                <Link
+                  href="/renewals"
+                  className="p-4 rounded-2xl bg-[#D7EFEA] hover:shadow-md transition flex items-center gap-3.5 group"
+                >
+                  <div className="w-10 h-10 rounded-full bg-[#0F172A] text-white flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h4 className="text-xs font-bold text-slate-900 truncate">
+                      GitHub Enterprise — CoPilot Add-on Audit
+                    </h4>
+                    <p className="text-[11px] text-slate-600 truncate mt-0.5">
+                      Due in 45 days • 95% utilization
+                    </p>
+                  </div>
+                </Link>
+              </>
+            )}
           </div>
 
         </div>

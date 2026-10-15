@@ -50,15 +50,46 @@ export async function GET(req: NextRequest) {
           ? Number(((assignedQuantity / lic.totalQuantity) * 100).toFixed(1)) 
           : 0);
 
-      const monthlyExpenditure = isToken
-        ? (allocatedTokens * tokenUnitCost || lic.totalQuantity * lic.costPerLicense)
-        : (lic.totalQuantity * lic.costPerLicense);
+      const freq = lic.billingFrequency || 'MONTHLY';
+      let annualExpenditure = 0;
+      let monthlyExpenditure = 0;
+      let unusedAnnualCost = 0;
+      let unusedMonthlyCost = 0;
+      let oneTimeExpenditure = 0;
 
-      const unusedMonthlyCost = isToken
-        ? remainingTokens * tokenUnitCost
-        : unusedQuantity * lic.costPerLicense;
+      if (isToken && allocatedTokens > 0 && tokenUnitCost > 0) {
+        const tokenPoolCost = allocatedTokens * tokenUnitCost;
+        const remainingCost = remainingTokens * tokenUnitCost;
+        if (freq === 'ANNUAL') {
+          annualExpenditure = tokenPoolCost;
+          monthlyExpenditure = tokenPoolCost / 12;
+          unusedAnnualCost = remainingCost;
+          unusedMonthlyCost = remainingCost / 12;
+        } else {
+          monthlyExpenditure = tokenPoolCost;
+          annualExpenditure = tokenPoolCost * 12;
+          unusedMonthlyCost = remainingCost;
+          unusedAnnualCost = remainingCost * 12;
+        }
+      } else if (freq === 'ANNUAL') {
+        annualExpenditure = lic.totalQuantity * lic.costPerLicense;
+        monthlyExpenditure = (lic.totalQuantity * lic.costPerLicense) / 12;
+        unusedAnnualCost = unusedQuantity * lic.costPerLicense;
+        unusedMonthlyCost = (unusedQuantity * lic.costPerLicense) / 12;
+      } else if (freq === 'MONTHLY') {
+        monthlyExpenditure = lic.totalQuantity * lic.costPerLicense;
+        annualExpenditure = lic.totalQuantity * lic.costPerLicense * 12;
+        unusedMonthlyCost = unusedQuantity * lic.costPerLicense;
+        unusedAnnualCost = unusedQuantity * lic.costPerLicense * 12;
+      } else if (freq === 'ONE_TIME') {
+        oneTimeExpenditure = lic.totalQuantity * lic.costPerLicense;
+        monthlyExpenditure = 0;
+        annualExpenditure = 0;
+        unusedMonthlyCost = 0;
+        unusedAnnualCost = 0;
+      }
 
-      const potentialAnnualSaving = unusedMonthlyCost * 12;
+      const potentialAnnualSaving = unusedAnnualCost;
 
       return {
         id: lic.id,
@@ -76,10 +107,11 @@ export async function GET(req: NextRequest) {
         utilizationRate,
         costPerLicense: lic.costPerLicense,
         billingFrequency: lic.billingFrequency,
-        monthlyExpenditure,
-        annualExpenditure: monthlyExpenditure * 12,
-        unusedMonthlyCost,
-        potentialAnnualSaving,
+        monthlyExpenditure: Math.round(monthlyExpenditure),
+        annualExpenditure: Math.round(annualExpenditure),
+        unusedMonthlyCost: Math.round(unusedMonthlyCost),
+        potentialAnnualSaving: Math.round(potentialAnnualSaving),
+        oneTimeExpenditure: Math.round(oneTimeExpenditure),
         purchaseDate: lic.purchaseDate,
         startDate: lic.startDate,
         renewalDate: lic.renewalDate,
@@ -109,6 +141,10 @@ export async function POST(req: NextRequest) {
       softwareId,
       licenseKey,
       licenseType = LicenseType.PER_USER,
+      consumptionType = 'SEAT_BASED',
+      allocatedTokens,
+      usedTokens,
+      tokenUnitCost,
       totalQuantity,
       costPerLicense,
       billingFrequency = BillingFrequency.MONTHLY,
@@ -132,6 +168,10 @@ export async function POST(req: NextRequest) {
 
     const totalQty = parseInt(totalQuantity, 10);
     const cost = parseFloat(costPerLicense);
+    const isToken = consumptionType === 'TOKEN_BASED';
+    const parsedAllocatedTokens = isToken ? parseFloat(allocatedTokens || '0') : 0;
+    const parsedUsedTokens = isToken ? parseFloat(usedTokens || '0') : 0;
+    const parsedTokenUnitCost = isToken ? parseFloat(tokenUnitCost || '0') : 0;
 
     const license = await prisma.$transaction(async (tx) => {
       const lic = await tx.license.create({
@@ -140,6 +180,10 @@ export async function POST(req: NextRequest) {
           vendorId: sw.vendorId,
           licenseKey,
           licenseType,
+          consumptionType,
+          allocatedTokens: parsedAllocatedTokens,
+          usedTokens: parsedUsedTokens,
+          tokenUnitCost: parsedTokenUnitCost,
           totalQuantity: totalQty,
           costPerLicense: cost,
           billingFrequency,
@@ -151,12 +195,16 @@ export async function POST(req: NextRequest) {
         },
       });
 
+      const renewalAnnualCost = isToken && parsedAllocatedTokens > 0
+        ? (billingFrequency === 'ANNUAL' ? parsedAllocatedTokens * parsedTokenUnitCost : parsedAllocatedTokens * parsedTokenUnitCost * 12)
+        : (billingFrequency === 'ANNUAL' ? totalQty * cost : totalQty * cost * 12);
+
       await tx.renewal.create({
         data: {
           softwareId,
           licenseId: lic.id,
           renewalDate: new Date(renewalDate),
-          estimatedCost: totalQty * cost,
+          estimatedCost: Math.round(renewalAnnualCost),
         },
       });
 
@@ -168,7 +216,7 @@ export async function POST(req: NextRequest) {
       action: AuditAction.CREATE,
       entity: 'License',
       entityId: license.id,
-      details: { softwareName: sw.name, totalQuantity: totalQty, costPerLicense: cost },
+      details: { softwareName: sw.name, totalQuantity: totalQty, costPerLicense: cost, billingFrequency },
     });
 
     return NextResponse.json({ success: true, license }, { status: 201 });

@@ -44,7 +44,17 @@ export async function GET(req: NextRequest) {
       const activeQty = r.license.assignments.length;
       const unusedQty = Math.max(0, totalQty - activeQty);
       const utilRate = totalQty > 0 ? Number(((activeQty / totalQty) * 100).toFixed(1)) : 0;
-      const potentialWastedSpend = unusedQty * r.license.costPerLicense;
+      const freq = r.license.billingFrequency || 'MONTHLY';
+      
+      let potentialAnnualWastedSpend = 0;
+      let potentialMonthlyWastedSpend = 0;
+      if (freq === 'ANNUAL') {
+        potentialAnnualWastedSpend = unusedQty * r.license.costPerLicense;
+        potentialMonthlyWastedSpend = (unusedQty * r.license.costPerLicense) / 12;
+      } else if (freq === 'MONTHLY') {
+        potentialMonthlyWastedSpend = unusedQty * r.license.costPerLicense;
+        potentialAnnualWastedSpend = unusedQty * r.license.costPerLicense * 12;
+      }
 
       return {
         ...r,
@@ -56,7 +66,9 @@ export async function GET(req: NextRequest) {
         unusedQuantity: unusedQty,
         utilizationRate: utilRate,
         costPerLicense: r.license.costPerLicense,
-        potentialWastedSpend,
+        potentialWastedSpend: Math.round(potentialAnnualWastedSpend),
+        potentialAnnualWastedSpend: Math.round(potentialAnnualWastedSpend),
+        potentialMonthlyWastedSpend: Math.round(potentialMonthlyWastedSpend),
       };
     });
 
@@ -87,14 +99,40 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Renewal ID is required' }, { status: 400 });
     }
 
-    const updated = await prisma.renewal.update({
-      where: { id },
-      data: {
-        renewalDate: renewalDate ? new Date(renewalDate) : undefined,
-        autoRenew: autoRenew !== undefined ? autoRenew : undefined,
-        status: status || undefined,
-        notes: notes !== undefined ? notes : undefined,
-      },
+    const updated = await prisma.$transaction(async (tx) => {
+      const existing = await tx.renewal.findUnique({
+        where: { id },
+        include: { license: true },
+      });
+
+      if (!existing) {
+        throw new Error('Renewal record not found');
+      }
+
+      const parsedDate = renewalDate ? new Date(renewalDate) : undefined;
+
+      const r = await tx.renewal.update({
+        where: { id },
+        data: {
+          renewalDate: parsedDate,
+          autoRenew: autoRenew !== undefined ? autoRenew : undefined,
+          status: status || undefined,
+          notes: notes !== undefined ? notes : undefined,
+        },
+      });
+
+      // Synchronize associated License renewal date & active status
+      if (parsedDate && existing.licenseId) {
+        await tx.license.update({
+          where: { id: existing.licenseId },
+          data: {
+            renewalDate: parsedDate,
+            status: status === 'RENEWED' ? 'ACTIVE' : undefined,
+          },
+        });
+      }
+
+      return r;
     });
 
     await recordAuditLog({
@@ -102,7 +140,7 @@ export async function PUT(req: NextRequest) {
       action: AuditAction.UPDATE_RENEWAL,
       entity: 'Renewal',
       entityId: id,
-      details: { autoRenew, status },
+      details: { autoRenew, status, renewalDate },
     });
 
     return NextResponse.json({ success: true, renewal: updated });

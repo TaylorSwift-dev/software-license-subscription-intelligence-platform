@@ -107,6 +107,15 @@ export async function POST(req: NextRequest) {
     const deptId = departmentId || targetUser.departmentId;
 
     const assignment = await prisma.$transaction(async (tx) => {
+      // Clean up any historical revoked assignment record for this user & license to avoid constraint collisions
+      await tx.licenseAssignment.deleteMany({
+        where: {
+          licenseId,
+          userId,
+          status: AssignmentStatus.REVOKED,
+        },
+      });
+
       const created = await tx.licenseAssignment.create({
         data: {
           licenseId,
@@ -118,18 +127,37 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // Update or create usage record
-      await tx.usageRecord.create({
-        data: {
+      // Update existing usage record or create if not present
+      const existingUsage = await tx.usageRecord.findFirst({
+        where: {
           userId,
           softwareId: targetLicense.softwareId,
-          licenseId: targetLicense.id,
-          lastActiveDate: new Date(),
-          loginCount: 1,
-          hoursUsed: 1.0,
-          utilizationStatus: 'MODERATE',
         },
       });
+
+      if (existingUsage) {
+        await tx.usageRecord.update({
+          where: { id: existingUsage.id },
+          data: {
+            licenseId: targetLicense.id,
+            lastActiveDate: new Date(),
+            loginCount: { increment: 1 },
+            hoursUsed: { increment: 1.0 },
+          },
+        });
+      } else {
+        await tx.usageRecord.create({
+          data: {
+            userId,
+            softwareId: targetLicense.softwareId,
+            licenseId: targetLicense.id,
+            lastActiveDate: new Date(),
+            loginCount: 1,
+            hoursUsed: 1.0,
+            utilizationStatus: 'MODERATE',
+          },
+        });
+      }
 
       return created;
     });

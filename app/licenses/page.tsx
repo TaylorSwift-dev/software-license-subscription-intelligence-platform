@@ -33,9 +33,12 @@ export default function LicensesPage() {
   const [formData, setFormData] = useState({
     softwareId: '',
     licenseType: 'PER_USER',
+    consumptionType: 'SEAT_BASED',
     totalQuantity: 20,
     costPerLicense: 1000,
     billingFrequency: 'MONTHLY',
+    allocatedTokens: 10000000,
+    tokenUnitCost: 0.002,
     renewalDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     notes: '',
   });
@@ -230,9 +233,10 @@ export default function LicensesPage() {
               {filteredLicenses.length > 0 ? (
                 filteredLicenses.map((lic) => {
                   const isToken = lic.consumptionType === 'TOKEN_BASED';
+                  const freq = lic.billingFrequency || 'MONTHLY';
                   const displayCost = viewMode === 'yearly'
-                    ? (lic.annualExpenditure || lic.monthlyExpenditure * 12)
-                    : (isToken ? (lic.monthlyExpenditure || 100000) : lic.costPerLicense);
+                    ? (lic.annualExpenditure ?? (freq === 'ANNUAL' ? lic.costPerLicense * lic.totalQuantity : lic.monthlyExpenditure * 12))
+                    : (lic.monthlyExpenditure ?? (freq === 'ANNUAL' ? (lic.costPerLicense * lic.totalQuantity) / 12 : lic.costPerLicense * lic.totalQuantity));
 
                   return (
                     <tr key={lic.id} className="hover:bg-slate-50/70 transition">
@@ -293,8 +297,13 @@ export default function LicensesPage() {
                         </div>
                       </td>
                       <td className="py-3 px-4 font-semibold text-slate-800">
-                        <div>{formatINR(displayCost)}{viewMode === 'yearly' ? '/yr' : '/mo'}</div>
-                        {isToken && viewMode === 'monthly' && (
+                        <div className="flex items-center gap-1.5">
+                          <span>{formatINR(displayCost)}{viewMode === 'yearly' ? '/yr' : '/mo'}</span>
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 text-slate-600 uppercase">
+                            {freq}
+                          </span>
+                        </div>
+                        {isToken && (
                           <div className="text-[10px] text-slate-400">@ ₹{lic.tokenUnitCost || 0.002}/token</div>
                         )}
                       </td>
@@ -345,7 +354,14 @@ export default function LicensesPage() {
                 <label className="font-semibold text-slate-700 block mb-1">Software</label>
                 <select
                   value={formData.softwareId}
-                  onChange={(e) => setFormData({ ...formData, softwareId: e.target.value })}
+                  onChange={(e) => {
+                    const selected = softwareList.find(s => s.id === e.target.value);
+                    setFormData({
+                      ...formData,
+                      softwareId: e.target.value,
+                      consumptionType: selected?.consumptionType || 'SEAT_BASED',
+                    });
+                  }}
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200"
                 >
                   {softwareList.map((sw) => (
@@ -355,6 +371,19 @@ export default function LicensesPage() {
               </div>
 
               <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">Billing Frequency</label>
+                  <select
+                    value={formData.billingFrequency}
+                    onChange={(e) => setFormData({ ...formData, billingFrequency: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200"
+                  >
+                    <option value="MONTHLY">Monthly</option>
+                    <option value="ANNUAL">Annual</option>
+                    <option value="ONE_TIME">One-Time</option>
+                  </select>
+                </div>
+
                 <div>
                   <label className="font-semibold text-slate-700 block mb-1">License Type</label>
                   <select
@@ -368,43 +397,72 @@ export default function LicensesPage() {
                     <option value="PER_CORE">Per Core</option>
                   </select>
                 </div>
-
-                <div>
-                  <label className="font-semibold text-slate-700 block mb-1">Total Quantity</label>
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={formData.totalQuantity}
-                    onChange={(e) => setFormData({ ...formData, totalQuantity: parseInt(e.target.value) || 1 })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200"
-                  />
-                </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-semibold text-slate-700 block mb-1">Cost Per Seat / Mo (₹)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    required
-                    value={formData.costPerLicense}
-                    onChange={(e) => setFormData({ ...formData, costPerLicense: parseFloat(e.target.value) || 0 })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200"
-                  />
+              {formData.consumptionType === 'TOKEN_BASED' ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-semibold text-slate-700 block mb-1">Allocated Tokens</label>
+                    <input
+                      type="number"
+                      min="1"
+                      required
+                      value={formData.allocatedTokens}
+                      onChange={(e) => setFormData({ ...formData, allocatedTokens: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-semibold text-slate-700 block mb-1">Unit Cost / Token (₹)</label>
+                    <input
+                      type="number"
+                      step="0.0001"
+                      min="0"
+                      required
+                      value={formData.tokenUnitCost}
+                      onChange={(e) => setFormData({ ...formData, tokenUnitCost: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200"
+                    />
+                  </div>
                 </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-semibold text-slate-700 block mb-1">Total Quantity</label>
+                    <input
+                      type="number"
+                      min="1"
+                      required
+                      value={formData.totalQuantity}
+                      onChange={(e) => setFormData({ ...formData, totalQuantity: parseInt(e.target.value) || 1 })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-semibold text-slate-700 block mb-1">
+                      Price / Seat {formData.billingFrequency === 'ANNUAL' ? '/ Yr' : formData.billingFrequency === 'ONE_TIME' ? 'One-time' : '/ Mo'} (₹)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      required
+                      value={formData.costPerLicense}
+                      onChange={(e) => setFormData({ ...formData, costPerLicense: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200"
+                    />
+                  </div>
+                </div>
+              )}
 
-                <div>
-                  <label className="font-semibold text-slate-700 block mb-1">Renewal Date</label>
-                  <input
-                    type="date"
-                    required
-                    value={formData.renewalDate}
-                    onChange={(e) => setFormData({ ...formData, renewalDate: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200"
-                  />
-                </div>
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Renewal Date</label>
+                <input
+                  type="date"
+                  required
+                  value={formData.renewalDate}
+                  onChange={(e) => setFormData({ ...formData, renewalDate: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200"
+                />
               </div>
 
               <div>

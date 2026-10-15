@@ -36,11 +36,26 @@ export async function calculateLicenseHealthScore(): Promise<HealthScoreBreakdow
 
   for (const sw of softwareList) {
     for (const lic of sw.licenses) {
+      const freq = lic.billingFrequency || 'MONTHLY';
+      const unused = Math.max(0, lic.totalQuantity - lic.assignments.length);
+      let licAnnualCost = 0;
+      let licAnnualWasted = 0;
+
+      if (freq === 'ANNUAL') {
+        licAnnualCost = lic.totalQuantity * lic.costPerLicense;
+        licAnnualWasted = unused * lic.costPerLicense;
+      } else if (freq === 'MONTHLY') {
+        licAnnualCost = lic.totalQuantity * lic.costPerLicense * 12;
+        licAnnualWasted = unused * lic.costPerLicense * 12;
+      } else {
+        licAnnualCost = lic.totalQuantity * lic.costPerLicense;
+        licAnnualWasted = 0;
+      }
+
       totalLicenses += lic.totalQuantity;
       activeLicenses += lic.assignments.length;
-      totalCost += lic.totalQuantity * lic.costPerLicense;
-      const unused = Math.max(0, lic.totalQuantity - lic.assignments.length);
-      wastedCost += unused * lic.costPerLicense;
+      totalCost += licAnnualCost;
+      wastedCost += licAnnualWasted;
     }
   }
 
@@ -121,9 +136,19 @@ export async function evaluateAndGenerateRecommendations() {
       const activeCount = lic.assignments.length;
       const unusedCount = Math.max(0, lic.totalQuantity - activeCount);
       const utilRate = lic.totalQuantity > 0 ? (activeCount / lic.totalQuantity) * 100 : 0;
+      const freq = lic.billingFrequency || 'MONTHLY';
+
+      let licAnnualSaving = 0;
+      let licMonthlySaving = 0;
+      if (freq === 'ANNUAL') {
+        licAnnualSaving = unusedCount * lic.costPerLicense;
+        licMonthlySaving = licAnnualSaving / 12;
+      } else if (freq === 'MONTHLY') {
+        licMonthlySaving = unusedCount * lic.costPerLicense;
+        licAnnualSaving = licMonthlySaving * 12;
+      }
 
       if (utilRate < 70 && unusedCount > 0) {
-        const monthlySaving = unusedCount * lic.costPerLicense;
         newRecommendations.push({
           softwareId: sw.id,
           licenseId: lic.id,
@@ -137,33 +162,36 @@ export async function evaluateAndGenerateRecommendations() {
             unusedLicenses: unusedCount,
             utilizationRate: Number(utilRate.toFixed(1)),
             costPerLicense: lic.costPerLicense,
+            billingFrequency: freq,
           },
-          estimatedMonthlySavings: monthlySaving,
-          estimatedAnnualSavings: monthlySaving * 12,
+          estimatedMonthlySavings: Math.round(licMonthlySaving),
+          estimatedAnnualSavings: Math.round(licAnnualSaving),
           suggestedAction: `Review ${unusedCount} idle seats to reassign to incoming personnel or negotiate reduced seat count on next invoice.`,
           status: RecommendationStatus.NEW,
         });
       }
 
       // RULE 4: High cost & low utilization
-      const totalMonthlySpend = lic.totalQuantity * lic.costPerLicense;
+      const totalMonthlySpend = freq === 'ANNUAL' ? (lic.totalQuantity * lic.costPerLicense) / 12 : lic.totalQuantity * lic.costPerLicense;
       if (totalMonthlySpend >= 30000 && utilRate < 60) {
-        const monthlySaving = unusedCount * lic.costPerLicense;
         newRecommendations.push({
           softwareId: sw.id,
           licenseId: lic.id,
           type: RecommendationType.COST_OPTIMIZATION,
           severity: RecommendationSeverity.CRITICAL,
           title: `High-Spend Optimization: ${sw.name}`,
-          reason: `High monthly expenditure (₹${totalMonthlySpend.toLocaleString('en-IN')}) paired with low utilization (${utilRate.toFixed(1)}%).`,
+          reason: `High monthly expenditure (₹${Math.round(totalMonthlySpend).toLocaleString('en-IN')}) paired with low utilization (${utilRate.toFixed(1)}%).`,
           supportingMetrics: {
-            totalMonthlySpend,
+            totalMonthlySpend: Math.round(totalMonthlySpend),
+            totalAnnualSpend: Math.round(totalMonthlySpend * 12),
             costPerLicense: lic.costPerLicense,
+            billingFrequency: freq,
             utilizationRate: Number(utilRate.toFixed(1)),
-            potentialMonthlySaving: monthlySaving,
+            potentialMonthlySaving: Math.round(licMonthlySaving),
+            potentialAnnualSaving: Math.round(licAnnualSaving),
           },
-          estimatedMonthlySavings: monthlySaving,
-          estimatedAnnualSavings: monthlySaving * 12,
+          estimatedMonthlySavings: Math.round(licMonthlySaving),
+          estimatedAnnualSavings: Math.round(licAnnualSaving),
           suggestedAction: `Initiate priority procurement audit to rightsize tiered subscription.`,
           status: RecommendationStatus.NEW,
         });
@@ -174,12 +202,27 @@ export async function evaluateAndGenerateRecommendations() {
   // RULE 2: Existing unused license available when employee requests software
   for (const req of pendingRequests) {
     let availableCount = 0;
+    let targetLic = req.software.licenses[0];
     for (const lic of req.software.licenses) {
       const active = lic.assignments.length;
-      availableCount += Math.max(0, lic.totalQuantity - active);
+      const avail = Math.max(0, lic.totalQuantity - active);
+      if (avail > 0 && !targetLic) targetLic = lic;
+      availableCount += avail;
     }
 
     if (availableCount > 0) {
+      const freq = targetLic?.billingFrequency || 'MONTHLY';
+      const costPerLic = targetLic?.costPerLicense || 0;
+      let estAnnual = 0;
+      let estMonthly = 0;
+      if (freq === 'ANNUAL') {
+        estAnnual = costPerLic;
+        estMonthly = costPerLic / 12;
+      } else {
+        estMonthly = costPerLic;
+        estAnnual = costPerLic * 12;
+      }
+
       newRecommendations.push({
         softwareId: req.softwareId,
         type: RecommendationType.USE_EXISTING_LICENSE,
@@ -190,9 +233,11 @@ export async function evaluateAndGenerateRecommendations() {
           requestId: req.id,
           userName: req.user.name,
           availableSeats: availableCount,
+          costPerLicense: costPerLic,
+          billingFrequency: freq,
         },
-        estimatedMonthlySavings: req.software.licenses[0]?.costPerLicense || 1000,
-        estimatedAnnualSavings: (req.software.licenses[0]?.costPerLicense || 1000) * 12,
+        estimatedMonthlySavings: Math.round(estMonthly),
+        estimatedAnnualSavings: Math.round(estAnnual),
         suggestedAction: `Fulfill request by allocating an existing unassigned license instead of purchasing a new seat.`,
         status: RecommendationStatus.NEW,
       });
@@ -205,9 +250,21 @@ export async function evaluateAndGenerateRecommendations() {
     if (daysUntilRenewal >= 0 && daysUntilRenewal <= 30) {
       let totalQty = 0;
       let activeQty = 0;
+      let renewalUnusedAnnual = 0;
+      let renewalUnusedMonthly = 0;
+
       for (const lic of ren.software.licenses) {
         totalQty += lic.totalQuantity;
         activeQty += lic.assignments.length;
+        const unassigned = Math.max(0, lic.totalQuantity - lic.assignments.length);
+        const freq = lic.billingFrequency || 'MONTHLY';
+        if (freq === 'ANNUAL') {
+          renewalUnusedAnnual += unassigned * lic.costPerLicense;
+          renewalUnusedMonthly += (unassigned * lic.costPerLicense) / 12;
+        } else {
+          renewalUnusedMonthly += unassigned * lic.costPerLicense;
+          renewalUnusedAnnual += unassigned * lic.costPerLicense * 12;
+        }
       }
       const util = totalQty > 0 ? (activeQty / totalQty) * 100 : 0;
       if (util < 70) {
@@ -222,8 +279,8 @@ export async function evaluateAndGenerateRecommendations() {
             daysUntilRenewal,
             utilizationRate: Number(util.toFixed(1)),
           },
-          estimatedMonthlySavings: Math.max(0, totalQty - activeQty) * (ren.software.licenses[0]?.costPerLicense || 0),
-          estimatedAnnualSavings: Math.max(0, totalQty - activeQty) * (ren.software.licenses[0]?.costPerLicense || 0) * 12,
+          estimatedMonthlySavings: Math.round(renewalUnusedMonthly),
+          estimatedAnnualSavings: Math.round(renewalUnusedAnnual),
           suggestedAction: `Do not auto-renew at current seat capacity. Adjust contract volume prior to deadline.`,
           status: RecommendationStatus.NEW,
         });
@@ -231,7 +288,7 @@ export async function evaluateAndGenerateRecommendations() {
     }
   }
 
-  // RULE 5: Duplicate Category / Overlapping software
+  // RULE 5: Duplicate Category / Overlapping software (Data-driven: secondary tool spend)
   const categoryMap = new Map<string, typeof softwareList>();
   for (const sw of softwareList) {
     const list = categoryMap.get(sw.category) || [];
@@ -242,6 +299,18 @@ export async function evaluateAndGenerateRecommendations() {
   categoryMap.forEach((tools, category) => {
     if (tools.length > 1) {
       const toolNames = tools.map(t => t.name).join(' & ');
+      let secondaryAnnualSpend = 0;
+      for (let i = 1; i < tools.length; i++) {
+        for (const lic of tools[i].licenses) {
+          const freq = lic.billingFrequency || 'MONTHLY';
+          if (freq === 'ANNUAL') {
+            secondaryAnnualSpend += lic.totalQuantity * lic.costPerLicense;
+          } else if (freq === 'MONTHLY') {
+            secondaryAnnualSpend += lic.totalQuantity * lic.costPerLicense * 12;
+          }
+        }
+      }
+
       newRecommendations.push({
         softwareId: tools[0].id,
         type: RecommendationType.DUPLICATE_CONSOLIDATION,
@@ -252,8 +321,8 @@ export async function evaluateAndGenerateRecommendations() {
           category,
           tools: tools.map(t => ({ name: t.name, vendor: t.vendor?.name })),
         },
-        estimatedMonthlySavings: 5000,
-        estimatedAnnualSavings: 60000,
+        estimatedMonthlySavings: Math.round(secondaryAnnualSpend / 12),
+        estimatedAnnualSavings: Math.round(secondaryAnnualSpend),
         suggestedAction: `Evaluate standardization on a single preferred platform across departments to leverage volume tier pricing.`,
         status: RecommendationStatus.NEW,
       });
